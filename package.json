@@ -1,5 +1,5 @@
 {
-  "name": "ai-sdk-openai-websocket",
+  "name": "@vercel/ai-sdk-openai-websocket",
   "private": true,
   "packageManager": "pnpm@10.11.0",
   "scripts": {
