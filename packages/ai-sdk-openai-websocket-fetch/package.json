@@ -1,5 +1,5 @@
 {
-  "name": "ai-sdk-openai-websocket-fetch",
+  "name": "@vercel/ai-sdk-openai-websocket-fetch",
   "version": "1.0.0",
   "description": "WebSocket transport for the AI SDK OpenAI provider — drop-in fetch replacement that routes streaming requests through a persistent WebSocket connection.",
   "type": "module",
