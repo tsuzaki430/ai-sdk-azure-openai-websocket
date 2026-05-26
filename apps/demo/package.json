@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.30",
+    "@ai-sdk/azure": "^3.0.66",
     "@ai-sdk/react": "^3",
     "@streamdown/code": "^1.0.3",
     "@tailwindcss/postcss": "^4.2.0",

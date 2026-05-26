@@ -4,7 +4,6 @@ import {
   convertToModelMessages,
   stepCountIs,
 } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
 import { createWebSocketFetch } from 'ai-sdk-openai-websocket-fetch';
 import {
   MODEL_ID,
@@ -12,6 +11,7 @@ import {
   SYSTEM_PROMPT,
   createTools,
 } from '@/lib/chat-api';
+import { createAzureOpenAI } from '@/lib/azure-openai';
 
 export const maxDuration = 300;
 
@@ -21,11 +21,11 @@ export async function POST(req: Request) {
   console.log(`[ws] Request with ${messages.length} messages`);
 
   const wsFetch = createWebSocketFetch();
-  const openai = createOpenAI({ fetch: wsFetch });
+  const azure = createAzureOpenAI(wsFetch);
   const tools = await createTools();
 
   const result = streamText({
-    model: openai(MODEL_ID),
+    model: azure(MODEL_ID),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
     tools,
