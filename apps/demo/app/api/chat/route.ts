@@ -4,13 +4,13 @@ import {
   convertToModelMessages,
   stepCountIs,
 } from 'ai';
-import { openai } from '@ai-sdk/openai';
 import {
   MODEL_ID,
   MAX_STEPS,
   SYSTEM_PROMPT,
   createTools,
 } from '@/lib/chat-api';
+import { createAzureOpenAI } from '@/lib/azure-openai';
 
 export const maxDuration = 300;
 
@@ -20,9 +20,10 @@ export async function POST(req: Request) {
   console.log(`[http] Request with ${messages.length} messages`);
 
   const tools = await createTools();
+  const azure = createAzureOpenAI();
 
   const result = streamText({
-    model: openai(MODEL_ID),
+    model: azure(MODEL_ID),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
     tools,

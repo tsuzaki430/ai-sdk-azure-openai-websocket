@@ -3,7 +3,7 @@ import WebSocket from 'ws';
 export interface CreateWebSocketFetchOptions {
   /**
    * WebSocket endpoint URL.
-   * @default 'wss://api.openai.com/v1/responses'
+   * When omitted, it is derived from the HTTP request URL.
    */
   url?: string;
 }
@@ -37,23 +37,48 @@ export interface CreateWebSocketFetchOptions {
 export function createWebSocketFetch(
   options?: CreateWebSocketFetchOptions,
 ) {
-  const wsUrl = options?.url ?? 'wss://api.openai.com/v1/responses';
-
   let ws: WebSocket | null = null;
   let connecting: Promise<WebSocket> | null = null;
+  let connectionKey: string | null = null;
   let busy = false;
 
-  function getConnection(authorization: string): Promise<WebSocket> {
-    if (ws?.readyState === WebSocket.OPEN && !busy) {
+  function getConnection(
+    wsUrl: string,
+    authorization: string,
+  ): Promise<WebSocket> {
+    // Azure OpenAI support: include both endpoint and auth in the reuse key so
+    // connections are not shared across Azure resources, base URLs, or API keys.
+    const nextConnectionKey = `${wsUrl}\n${authorization}`;
+
+    if (
+      ws?.readyState === WebSocket.OPEN &&
+      !busy &&
+      connectionKey === nextConnectionKey
+    ) {
       return Promise.resolve(ws);
     }
 
-    if (connecting && !busy) return connecting;
+    if (connecting && !busy && connectionKey === nextConnectionKey) {
+      return connecting;
+    }
+
+    if (ws && connectionKey !== nextConnectionKey) {
+      ws.close();
+      ws = null;
+    }
+
+    connectionKey = nextConnectionKey;
 
     connecting = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(wsUrl, {
+        // Azure OpenAI support: Azure may return a 302 to a credentialed
+        // WebSocket URL during the handshake, so the ws client must follow it.
+        followRedirects: true,
+        maxRedirects: 3,
         headers: {
           Authorization: authorization,
+          // Azure OpenAI support: enable Responses API WebSocket mode during
+          // the WebSocket handshake.
           'OpenAI-Beta': 'responses_websockets=2026-02-06',
         },
       });
@@ -72,7 +97,10 @@ export function createWebSocketFetch(
       });
 
       socket.on('close', () => {
-        if (ws === socket) ws = null;
+        if (ws === socket) {
+          ws = null;
+          connectionKey = null;
+        }
       });
     });
 
@@ -88,9 +116,15 @@ export function createWebSocketFetch(
         ? input.toString()
         : typeof input === 'string'
           ? input
-          : input.url;
+        : input.url;
 
-    if (init?.method !== 'POST' || !url.endsWith('/responses')) {
+    if (init?.method !== 'POST') {
+      return globalThis.fetch(input, init);
+    }
+
+    // Azure OpenAI support: Azure appends api-version as a query string, so
+    // endpoint matching must use URL.pathname instead of string endsWith().
+    if (!isResponsesUrl(url)) {
       return globalThis.fetch(input, init);
     }
 
@@ -101,17 +135,26 @@ export function createWebSocketFetch(
       return globalThis.fetch(input, init);
     }
 
-    if (!body.stream) {
+    if (body.stream !== true) {
       return globalThis.fetch(input, init);
     }
 
     const headers = normalizeHeaders(init.headers);
-    const authorization = headers['authorization'] ?? '';
+    // Azure OpenAI support: @ai-sdk/azure sends api-key, but the WebSocket
+    // handshake expects Authorization: Bearer <api-key>. Preserve an existing
+    // authorization header if one was already provided.
+    const authorization =
+      headers['authorization'] ?? `Bearer ${headers['api-key'] ?? ''}`;
+    // Azure OpenAI support: derive the WebSocket URL from the actual HTTP
+    // request URL so Azure resource/baseURL settings are followed automatically.
+    const wsUrl = options?.url ?? deriveWebSocketUrl(url);
 
-    const connection = await getConnection(authorization);
+    const connection = await getConnection(wsUrl, authorization);
     busy = true;
 
-    const { stream: _, ...requestBody } = body;
+    // Azure OpenAI support: stream/background are HTTP request fields and must
+    // not be forwarded in the response.create WebSocket payload.
+    const { stream: _, background: _background, ...requestBody } = body;
     const encoder = new TextEncoder();
 
     const responseStream = new ReadableStream<Uint8Array>({
@@ -208,9 +251,32 @@ export function createWebSocketFetch(
       if (ws) {
         ws.close();
         ws = null;
+        connectionKey = null;
       }
     },
   });
+}
+
+function isResponsesUrl(url: string): boolean {
+  try {
+    // Azure OpenAI support: ignore api-version and other query parameters when
+    // deciding whether the HTTP request targets the Responses API.
+    return new URL(url).pathname.endsWith('/responses');
+  } catch {
+    return false;
+  }
+}
+
+function deriveWebSocketUrl(url: string): string {
+  const parsed = new URL(url);
+  // Azure OpenAI support: convert the HTTP scheme to the matching WebSocket
+  // scheme while preserving the Azure resource/base path.
+  parsed.protocol = parsed.protocol === 'http:' ? 'ws:' : 'wss:';
+  // Azure OpenAI support: the WebSocket endpoint is the Responses path without
+  // api-version or fragment data from the HTTP request URL.
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
 }
 
 function normalizeHeaders(
