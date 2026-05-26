@@ -169,15 +169,11 @@ export function createWebSocketFetch(
         function onMessage(data: WebSocket.RawData) {
           const text = data.toString();
           const lines = text.split(/\r?\n/);
-          // Azure OpenAI support: keep the existing WebSocket-event-to-SSE
-          // bridge so the AI SDK can consume the response as an SSE stream.
           const sseData = lines.map(line => `data: ${line}`).join('\n');
           controller.enqueue(encoder.encode(`${sseData}\n\n`));
 
           try {
             const event = JSON.parse(text);
-            // Azure OpenAI support: these Responses API events terminate the
-            // SSE stream returned to the AI SDK.
             if (
               event.type === 'response.completed' ||
               event.type === 'response.failed' ||
